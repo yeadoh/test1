@@ -1,0 +1,55 @@
+name: Deploy S3 EC2
+
+on:
+  push:
+    branches:
+      - main  # test1 레포지토리의 main 브랜치에 올리면 작동!
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 코드 체크아웃
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # 2. AWS 인증 (GitHub Secrets 사용)
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-2
+
+      # 3. S3로 파일 업로드 (Sync)
+      - name: Upload to S3
+        run: |
+          # ⚠️ 본인 버킷 이름으로 수정하세요!
+          aws s3 sync . s3://busan-sea-guide-project-s3 --delete --exclude ".git/*" --exclude ".github/*"
+
+      # 4. EC2에 접속해서 "S3에서 다운받아!" 명령 내리기
+      - name: Trigger EC2 Deployment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST_IP }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          port: 22
+          script: |
+            # ⚠️ 주의: 여기도 버킷 이름을 똑같이 적어주세요!
+            BUCKET_NAME="busan-sea-guide-project-s3"
+            WEB_ROOT="/usr/share/nginx/html"
+            
+            echo "🚀 S3 배포 시작 (Main Branch)!"
+            
+            # (1) S3에서 웹 서버 폴더로 다운로드
+            sudo aws s3 sync s3://$BUCKET_NAME $WEB_ROOT --delete
+            
+            # (2) 권한 재설정
+            sudo chown -R ec2-user:ec2-user $WEB_ROOT
+            
+            # (3) Nginx 재시작
+            sudo systemctl restart nginx
+            
+            echo "✅ 배포 완료!"
